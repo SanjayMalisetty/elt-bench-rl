@@ -1,6 +1,6 @@
 import duckdb
 import pandas as pd
-import numpy as np
+from warehouse import quote_identifier
 
 class ELTVerifier:
     def __init__(self, golden_df: pd.DataFrame):
@@ -14,14 +14,26 @@ class ELTVerifier:
         """
         try:
             # Grab the agent's final table
-            agent_df = conn.execute(f"SELECT * FROM {target_table_name}").df().reset_index(drop=True)
+            agent_df = conn.execute(
+                f"SELECT * FROM {quote_identifier(target_table_name)}"
+            ).df().reset_index(drop=True)
 
             if agent_df.shape != self.golden_df.shape:
                 return 0.0
 
-            # Ensure order-agnostic comparison by sorting columns
-            agent_df = agent_df.reindex(sorted(agent_df.columns), axis=1)
-            golden_sorted = self.golden_df.reindex(sorted(self.golden_df.columns), axis=1)
+            columns = sorted(agent_df.columns)
+            if columns != sorted(self.golden_df.columns):
+                return 0.0
+
+            agent_df = agent_df.reindex(columns=columns)
+            golden_sorted = self.golden_df.reindex(columns=columns)
+
+            agent_df = agent_df.sort_values(
+                by=columns, kind="mergesort", key=lambda values: values.map(repr)
+            ).reset_index(drop=True)
+            golden_sorted = golden_sorted.sort_values(
+                by=columns, kind="mergesort", key=lambda values: values.map(repr)
+            ).reset_index(drop=True)
 
             pd.testing.assert_frame_equal(agent_df, golden_sorted, check_like=True, check_dtype=False)
             return 1.0
@@ -31,9 +43,6 @@ class ELTVerifier:
     @staticmethod
     def perturb_source_data(source_df: pd.DataFrame) -> pd.DataFrame:
         """
-        Shuffle rows and scramble IDs on reset so agent can't memorize/hardcode outputs.
+        Shuffle rows on reset without changing relationships between columns.
         """
-        perturbed = source_df.sample(frac=1.0).reset_index(drop=True)
-        if 'id' in perturbed.columns:
-            perturbed['id'] = np.random.permutation(perturbed['id'].values)
-        return perturbed
+        return source_df.sample(frac=1.0).reset_index(drop=True)

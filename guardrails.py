@@ -18,14 +18,14 @@ class ExecutionSandbox:
             except Exception:
                 pass
 
-        env = os.environ.copy()
-        if env_vars:
-            env.update(env_vars)
-
         with tempfile.TemporaryDirectory() as temp_dir:
             file_path = os.path.join(temp_dir, "run.py")
             with open(file_path, "w") as f:
                 f.write(script_code)
+
+            env = {key: os.environ[key] for key in ("PATH", "SYSTEMROOT") if key in os.environ}
+            if env_vars:
+                env.update({str(key): str(value) for key, value in env_vars.items()})
 
             try:
                 proc = subprocess.run(
@@ -34,6 +34,7 @@ class ExecutionSandbox:
                     text=True,
                     timeout=timeout,
                     env=env,
+                    cwd=temp_dir,
                     preexec_fn=limit_resources if sys.platform != "win32" else None
                 )
                 
